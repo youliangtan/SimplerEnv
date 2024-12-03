@@ -128,6 +128,8 @@ print(simpler_env.ENVIRONMENTS)
 | widowx_carrot_on_plate   | PutCarrotOnPlateInScene-v0                    | <img src="./images/example_visualization/widowx_carrot_on_plate_visual_matching.png" width="128" height="128" > |
 | widowx_stack_cube        | StackGreenCubeOnYellowCubeBakedTexInScene-v0  | <img src="./images/example_visualization/widowx_stack_cube_visual_matching.png" width="128" height="128" > |
 | widowx_put_eggplant_in_basket        | PutEggplantInBasketScene-v0  | <img src="./images/example_visualization/widowx_put_eggplant_in_basket_visual_matching.png" width="128" height="128" > |
+| widowx_open_drawer      | OpenSmallDrawerCustomInScene-v0                    | <img src="./images/example_visualization/widowx_open_drawer.png" width="128" height="128" > |
+| widowx_close_drawer     | CloseSmallDrawerCustomInScene-v0                    | <img src="./images/example_visualization/widowx_close_drawer.png" width="128" height="128" > |
 
 We also support creating sub-tasks variations such as `google_robot_pick_{horizontal/vertical/standing}_coke_can`, `google_robot_open_{top/middle/bottom}_drawer`, and `google_robot_close_{top/middle/bottom}_drawer`. For the `google_robot_place_in_closed_drawer` task, we use the `google_robot_place_apple_in_closed_top_drawer` subtask for paper evaluations.
 

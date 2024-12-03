@@ -27,6 +27,8 @@ ENVIRONMENTS = [
     "widowx_carrot_on_plate",
     "widowx_stack_cube",
     "widowx_put_eggplant_in_basket",
+    "widowx_open_drawer",
+    "widowx_close_drawer",
 ]
 
 ENVIRONMENT_MAP = {
@@ -67,6 +69,8 @@ ENVIRONMENT_MAP = {
     "widowx_carrot_on_plate": ("PutCarrotOnPlateInScene-v0", {}),
     "widowx_stack_cube": ("StackGreenCubeOnYellowCubeBakedTexInScene-v0", {}),
     "widowx_put_eggplant_in_basket": ("PutEggplantInBasketScene-v0", {}),
+    "widowx_open_drawer": ("OpenSmallDrawerCustomInScene-v0", {}),
+    "widowx_close_drawer": ("CloseSmallDrawerCustomInScene-v0", {}),
 }
 
 
@@ -76,4 +80,5 @@ def make(task_name):
     env_name, kwargs = ENVIRONMENT_MAP[task_name]
     kwargs["prepackaged_config"] = True
     env = gym.make(env_name, obs_mode="rgbd", **kwargs)
+    print(f"  \n\n - Created environment {env_name}")
     return env
