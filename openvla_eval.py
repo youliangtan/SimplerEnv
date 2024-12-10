@@ -52,10 +52,12 @@ if __name__ == "__main__":
     parser.add_argument("--test", action="store_true")
     parser.add_argument("--vla_url", type=str, default="http://100.76.193.18:8000/act")
     parser.add_argument("--eval_count", type=int, default=1)
+    parser.add_argument("--episode_length", type=int, default=120)
     parser.add_argument("--output_video_dir", type=str, default=None)
     args = parser.parse_args()
 
     env = simpler_env.make(args.env)
+    env._max_episode_steps = args.episode_length # override the max episode length
 
     instruction = env.get_language_instruction()
     print("Instruction", instruction)
