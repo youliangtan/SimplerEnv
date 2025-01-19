@@ -1,12 +1,23 @@
 """
 Test script to run the eval
 
-python simpler_eval.py --test --env widowx_open_drawer
-python simpler_eval.py --test --env widowx_close_drawer
+python eval_simpler.py --test --env widowx_open_drawer
+python eval_simpler.py --test --env widowx_close_drawer
 
 # Openvla api call
-python simpler_eval.py --env widowx_open_drawer --vla_url http://XXX.XXX.XXX.XXX:6633/act
-python simpler_eval.py --env widowx_close_drawer --vla_url http://XXX.XXX.XXX.XXX:6633/act
+python eval_simpler.py --env widowx_open_drawer --vla_url http://XXX.XXX.XXX.XXX:6633/act
+python eval_simpler.py --env widowx_close_drawer --vla_url http://XXX.XXX.XXX.XXX:6633/act
+
+
+# octo policy
+python eval_simpler.py --env widowx_open_drawer --octo
+python eval_simpler.py --env widowx_close_drawer --octo
+
+# gcbc policy
+# NOTE: the config is located in eval_config.py
+# this also requires $PWD/goal_images/task_name.png
+python eval_simpler.py --env widowx_open_drawer --gcbc
+python eval_simpler.py --env widowx_close_drawer --gcbc
 """
 
 import simpler_env
@@ -333,14 +344,8 @@ if __name__ == "__main__":
             else:
                 action = policy.get_action(obs, instruction)
 
-            print(f"Step {step_count} Action: {action}")
+            # print(f"Step {step_count} Action: {action}")
             obs, reward, done, truncated, info = env.step(action)
-            # for long horizon tasks, you can call env.advance_to_next_subtask() to advance to the next subtask; the environment might also autoadvance if env._e>
-            # new_instruction = env.get_language_instruction()
-            # if new_instruction != instruction:
-            #    # for long horizon tasks, we get a new instruction when robot proceeds to the next subtask
-            #    instruction = new_instruction
-            #    print("New Instruction", instruction)
             step_count += 1
 
         # check if the episode is successful
@@ -363,4 +368,4 @@ if __name__ == "__main__":
 
         episode_stats = info.get("episode_stats", {})
         print("Episode stats", episode_stats)
-        print_green(f"Success rate: {success_count}/{args.eval_count}")
+        print_green(f"Success rate: {success_count}/{i + 1}")
