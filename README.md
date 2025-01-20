@@ -128,6 +128,7 @@ print(simpler_env.ENVIRONMENTS)
 | widowx_carrot_on_plate   | PutCarrotOnPlateInScene-v0                    | <img src="./images/example_visualization/widowx_carrot_on_plate_visual_matching.png" width="128" height="128" > |
 | widowx_stack_cube        | StackGreenCubeOnYellowCubeBakedTexInScene-v0  | <img src="./images/example_visualization/widowx_stack_cube_visual_matching.png" width="128" height="128" > |
 | widowx_put_eggplant_in_basket        | PutEggplantInBasketScene-v0  | <img src="./images/example_visualization/widowx_put_eggplant_in_basket_visual_matching.png" width="128" height="128" > |
+| widowx_put_eggplant_in_sink        | PutEggplantInSinkScene-v0  | <img src="./images/example_visualization/widowx_put_eggplant_in_sink_visual_matching.png" width="128" height="128" > |
 | widowx_open_drawer      | OpenSmallDrawerCustomInScene-v0                    | <img src="./images/example_visualization/widowx_open_drawer.png" width="128" height="128" > |
 | widowx_close_drawer     | CloseSmallDrawerCustomInScene-v0                    | <img src="./images/example_visualization/widowx_close_drawer.png" width="128" height="128" > |
 

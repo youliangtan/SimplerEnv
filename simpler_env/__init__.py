@@ -27,6 +27,7 @@ ENVIRONMENTS = [
     "widowx_carrot_on_plate",
     "widowx_stack_cube",
     "widowx_put_eggplant_in_basket",
+    "widowx_put_eggplant_in_sink",  # TODO(YL): Add this task
     "widowx_open_drawer",
     "widowx_close_drawer",
 ]
@@ -69,6 +70,7 @@ ENVIRONMENT_MAP = {
     "widowx_carrot_on_plate": ("PutCarrotOnPlateInScene-v0", {}),
     "widowx_stack_cube": ("StackGreenCubeOnYellowCubeBakedTexInScene-v0", {}),
     "widowx_put_eggplant_in_basket": ("PutEggplantInBasketScene-v0", {}),
+    "widowx_put_eggplant_in_sink": ("PutEggplantInSinkScene-v0", {}),
     "widowx_open_drawer": ("OpenSmallDrawerCustomInScene-v0", {}),
     "widowx_close_drawer": ("CloseSmallDrawerCustomInScene-v0", {}),
 }
