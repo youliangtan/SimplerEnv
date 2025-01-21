@@ -13,11 +13,6 @@ python eval_simpler.py --env widowx_close_drawer --vla_url http://XXX.XXX.XXX.XX
 python eval_simpler.py --env widowx_open_drawer --octo
 python eval_simpler.py --env widowx_close_drawer --octo
 
-# gcbc policy
-# NOTE: the config is located in eval_config.py
-# this also requires $PWD/goal_images/task_name.png
-python eval_simpler.py --env widowx_open_drawer --gcbc
-python eval_simpler.py --env widowx_close_drawer --gcbc
 """
 
 import simpler_env
@@ -42,12 +37,16 @@ except ImportError:
     print("JAX not installed.")
     print("Please install jax using `pip install jax` if you want to use Octo model.")
 
+from transforms3d import euler as te
+from transforms3d import quaternions as tq
+
 json_numpy.patch()
 
 print_green = lambda x: print("\033[92m {}\033[00m".format(x))
 
 # print numpy array with 2 decimal points
 np.set_printoptions(precision=2)
+
 
 ########################################################################
 class OpenVLAPolicy:
@@ -103,141 +102,9 @@ class OctoPolicy:
         # return actions from jax to numpy and take only the first action
         return np.asarray(actions)
 
-########################################################################
-
-
-def unnormalize_actions(actions, metadata):
-    """normalize the first 6 dimensions of the widowx actions"""
-    gripper_action = 1.0 if actions[6] > 0 else 0.0
-    actions = np.concatenate(
-        [
-            metadata["std"][:6] * actions[:6] + metadata["mean"][:6],
-            np.array([gripper_action]),
-        ]
-    )
-    return actions
-
-
-def create_bridge_example_batch(batch_size, img_size):
-    """create a dummy batch of the correct shape to create the agent"""
-    example_batch = {
-        "observations": {
-            "proprio": np.zeros(
-                (
-                    batch_size,
-                    7,
-                ),
-            ),
-            "image": np.zeros(
-                (batch_size, img_size, img_size, 3),
-            ),
-        },
-        "goals": {
-            "image": np.zeros(
-                (batch_size, img_size, img_size, 3),
-            ),
-        },
-        "actions": np.zeros(
-            (
-                batch_size,
-                7,
-            ),
-        ),
-    }
-    return example_batch
-
-
-class GCPolicy():
-    def __init__(self, config, device="cuda:0"):
-        self.config = config
-        self.device = device
-        self.agent = self.create_agent()
-        self.action_statistics = {
-            "mean": self.config["ACT_MEAN"],
-            "std": self.config["ACT_STD"],
-        }
-
-
-    def create_agent(self):
-        # lazy imports
-        from flax.training import checkpoints
-        from jaxrl_m.agents import agents
-        from jaxrl_m.vision import encoders
-
-        # encoder
-        encoder_def = encoders[self.config["encoder"]](**self.config["encoder_kwargs"])
-
-        # create agent
-        example_batch = create_bridge_example_batch(
-            batch_size=1, img_size=self.config["obs_image_size"]
-        )
-        self.rng = jax.random.PRNGKey(self.config["seed"])
-        self.rng, construct_rng = jax.random.split(self.rng)
-        agent = agents[self.config["policy_class"]].create(
-            rng=construct_rng,
-            observations=example_batch["observations"],
-            goals=example_batch["goals"],
-            actions=example_batch["actions"],
-            encoder_def=encoder_def,
-            **self.config["agent_kwargs"],
-        )
-        assert os.path.exists(self.config["checkpoint_path"]), "Checkpoint not found"
-        agent = checkpoints.restore_checkpoint(self.config["checkpoint_path"], agent)
-        return agent
-
-    def get_action(
-        self,
-        obs_dict,
-        language_instruction,
-        deterministic=True,
-    ):
-        """the run loop code should pass in a `goal` field in the obs_dict
-        Otherwise, the policy will look for a pre-specified goal in the `goal_images/` dir,
-        with the filename being the language instruction
-        """
-        obs_image = obs_dict["image_primary"]
-
-        # get the goal image
-        try:
-            goal_image = obs_dict["goal"]
-        except KeyError:
-            print("Goal not provided in obs_dict, looking for pre-specified goal")
-            goal_file = os.path.join("goal_images", language_instruction + ".png")
-            assert os.path.exists(
-                goal_file
-            ), f"Goal file {goal_file} not found, and not provided in obs_dict"
-            goal_image = cv2.imread(goal_file)
-
-        assert obs_image.shape == (
-            self.config["obs_image_size"],
-            self.config["obs_image_size"],
-            3,
-        ), "Bad input obs image shape"
-        print(goal_image.shape)
-        goal_image = cv2.resize(goal_image, (256, 256))
-        assert goal_image.shape == (
-            self.config["obs_image_size"],
-            self.config["obs_image_size"],
-            3,
-        ), "Bad input goal image shape"
-
-        self.rng, action_rng = jax.random.split(self.rng)
-        # actions, action_mode 
-        actions = self.agent.sample_actions(
-            {"image": obs_image[np.newaxis, ...]},
-            {"image": goal_image[np.newaxis, ...]},
-            temperature=0.0,
-            argmax=deterministic,
-            seed=None if deterministic else action_rng,
-        )
-        print("Actions", actions)
-        actions = np.array(actions)[0]  # unbatch
-        actions = unnormalize_actions(actions, self.action_statistics)
-
-        return actions
-
 
 ########################################################################
+
 
 class WrapSimplerEnv(gym.Wrapper):
     def __init__(self, env):
@@ -246,6 +113,9 @@ class WrapSimplerEnv(gym.Wrapper):
             {
                 "image_primary": gym.spaces.Box(
                     low=0, high=255, shape=(256, 256, 3), dtype=np.uint8
+                ),
+                "proprio": gym.spaces.Box(
+                    low=-np.inf, high=np.inf, shape=(8,), dtype=np.float32
                 ),
             }
         )
@@ -260,6 +130,11 @@ class WrapSimplerEnv(gym.Wrapper):
         return obs, reset_info
 
     def step(self, action):
+        """
+        NOTE action is 7 dim
+        [dx, dy, dz, droll, dpitch, dyaw, gripper]
+        gripper: -1 close, 1 open
+        """
         obs, reward, done, truncated, info = self.env.step(action)
         obs, additional_info = self._process_obs(obs)
         info.update(additional_info)
@@ -267,14 +142,90 @@ class WrapSimplerEnv(gym.Wrapper):
 
     def _process_obs(self, obs):
         img = get_image_from_maniskill2_obs_dict(self.env, obs)
+        proprio = self._process_proprio(obs)
         return (
             {
                 "image_primary": cv2.resize(img, (256, 256)),
+                "proprio": proprio,
             }, 
             {
                 "original_image_primary": img,
             }
         )
+    
+    def _process_proprio(self, obs):
+        """
+        Process proprioceptive information
+        """
+        # TODO: should we use rxyz instead of quaternion?
+        # 3 dim translation, 4 dim quaternion rotation and 1 dim gripper
+        eef_pose = obs['agent']["eef_pos"]
+        # joint_angles = obs['agent']['qpos'] # 8-dim vector joint angles
+        return eef_pose
+
+
+class BridgeSimplerStateWrapper(gym.Wrapper):
+    """
+    NOTE(YL): this converts the prorio from the default 
+    [x, y, z, qx, qy, qz, qw, gripper [0, 1]]
+    is adapted from:
+    https://github.com/allenzren/open-pi-zero/blob/main/src/agent/env_adapter/simpler.py
+    """
+    def __init__(self, env, **kwargs):
+        super(BridgeSimplerStateWrapper, self).__init__(env)
+        # EE pose in Bridge data was relative to a top-down pose, instead of robot base
+        self.default_rot = np.array(
+            [[0, 0, 1.0], [0, 1.0, 0], [-1.0, 0, 0]]
+        )  # https://github.com/rail-berkeley/bridge_data_robot/blob/b841131ecd512bafb303075bd8f8b677e0bf9f1f/widowx_envs/widowx_controller/src/widowx_controller/widowx_controller.py#L203
+        
+        # NOTE: now proprio is size 7
+        self.observation_space = gym.spaces.Dict(
+            {
+                "image_primary": gym.spaces.Box(
+                    low=0, high=255, shape=(256, 256, 3), dtype=np.uint8
+                ),
+                "proprio": gym.spaces.Box(
+                    low=-np.inf, high=np.inf, shape=(7,), dtype=np.float32
+                ),
+            }
+        )
+
+    def reset(self, **kwargs):
+        obs, info = super().reset(**kwargs)
+        obs["proprio"] = self._preprocess_proprio(obs)
+        return obs, info
+
+    def step(self, action):
+        action[-1] = self._postprocess_gripper(action[-1])
+        obs, reward, done, trunc, info = super().step(action)
+        obs["proprio"] = self._preprocess_proprio(obs)
+        assert len(obs["proprio"]) == 7, "propio is incorrect size"
+        return obs, reward, done, trunc, info
+
+    def _preprocess_proprio(self, obs: dict) -> np.array:
+        # convert ee rotation to the frame of top-down
+        # proprio = obs["agent"]["eef_pos"]
+        proprio = obs["proprio"]
+        assert len(proprio) == 8, "original proprio should be size 8"
+        rm_bridge = tq.quat2mat(proprio[3:7])
+        rpy_bridge_converted = te.mat2euler(rm_bridge @ self.default_rot.T)
+        gripper_openness = proprio[7]
+        raw_proprio = np.concatenate(
+            [
+                proprio[:3],
+                rpy_bridge_converted,
+                [gripper_openness],
+            ]
+        )
+        return raw_proprio
+
+    def _postprocess_gripper(self, action: float) -> float:
+        """from simpler octo inference: https://github.com/allenzren/SimplerEnv/blob/7d39d8a44e6d5ec02d4cdc9101bb17f5913bcd2a/simpler_env/policies/octo/octo_model.py#L234-L235"""
+        # trained with [0, 1], 0 for close, 1 for open
+        # convert to -1 close, 1 open for simpler
+        action_gripper = 2.0 * (action > 0.5) - 1.0
+        return action_gripper
+
 
 ########################################################################
 
@@ -283,7 +234,6 @@ if __name__ == "__main__":
     parser.add_argument("--env", type=str, default="widowx_close_drawer")
     parser.add_argument("--test", action="store_true")
     parser.add_argument("--octo", action="store_true")
-    parser.add_argument("--gcbc", action="store_true")
     parser.add_argument("--vla_url", type=str, default="http://100.76.193.18:6633/act")
     parser.add_argument("--eval_count", type=int, default=10)
     parser.add_argument("--episode_length", type=int, default=120)
@@ -297,6 +247,10 @@ if __name__ == "__main__":
 
     env = WrapSimplerEnv(base_env)
 
+    if "widowx" in args.env:
+        print("Wrap Simpler with bridge state wrapper for proprio and action convention")
+        env = BridgeSimplerStateWrapper(env)
+
     print("Instruction", instruction)
 
     if not args.test:
@@ -306,9 +260,6 @@ if __name__ == "__main__":
 
             env = HistoryWrapper(env, horizon=2)
             env = TemporalEnsembleWrapper(env, 4)
-        elif args.gcbc:
-            from eval_config import jaxrl_gc_policy_kwargs
-            policy = GCPolicy(jaxrl_gc_policy_kwargs)
         else:
             policy = OpenVLAPolicy(args.vla_url)
 

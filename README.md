@@ -1,5 +1,16 @@
 # SimplerEnv: Simulated Manipulation Policy Evaluation Environments for Real Robot Setups
 
+
+> ## What's different in this fork?
+> We introduce 1 new scene: drawer scene, and 3 more tasks:
+> - `widowx_open_drawer`: Open a small drawer
+> - `widowx_close_drawer`: Close a small drawer
+> - `widowx_put_eggplant_in_sink`: Put an eggplant in a sink
+> Also, proprioception is provided in obs
+> - with array(7) and array(8) convention.
+
+---
+
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/simpler-env/SimplerEnv/blob/main/example.ipynb)
 
 ![](./images/teaser.png)

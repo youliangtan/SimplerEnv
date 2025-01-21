@@ -21,3 +21,4 @@ wandb
 einops
 transformers
 scipy==1.12.0
+transforms3d
