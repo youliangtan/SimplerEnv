@@ -47,6 +47,13 @@ print_green = lambda x: print("\033[92m {}\033[00m".format(x))
 # print numpy array with 2 decimal points
 np.set_printoptions(precision=2)
 
+def view_img(obs_dict):
+    """Simple image viewer for debugging"""
+    for key, img in obs_dict.items():
+        if isinstance(img, np.ndarray) and len(img.shape) == 3:
+            cv2.imshow(f"Debug {key}", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+            cv2.waitKey(1)
+
 
 ########################################################################
 class OpenVLAPolicy:
@@ -102,6 +109,98 @@ class OctoPolicy:
         # return actions from jax to numpy and take only the first action
         return np.asarray(actions)
 
+
+########################################################################
+
+
+class GR00TPolicy:
+    """The exact keys used is defined in modality.json
+
+    This currently only supports so100_follower, so101_follower
+    modify this code to support other robots with other keys based on modality.json
+    
+    TODO: use https://huggingface.co/ShuaiYang03/GR00T-N1.5-Lerobot-SimplerEnv-BridgeV2
+    """
+
+    def __init__(
+        self,
+        host="localhost",
+        port=5555,
+        camera_keys=[],
+        robot_state_keys=[],
+        show_images=False,
+    ):
+        from service import ExternalRobotInferenceClient
+
+        self.policy = ExternalRobotInferenceClient(host=host, port=port)
+        self.camera_keys = camera_keys
+        self.robot_state_keys = robot_state_keys
+        self.show_images = show_images
+        # Remove the assertion for robot_state_keys as we'll handle it differently
+        # assert (
+        #     len(robot_state_keys) == 6
+        # ), f"robot_state_keys should be size 6, but got {len(robot_state_keys)} "
+        self.modality_keys = ["x", "y", "z", "roll", "pitch", "yaw", "pad", "gripper"]
+
+    def get_action(self, observation_dict, lang: str):
+        # Handle the actual observation format from SimplerEnv
+        obs_dict = {}
+        
+        # Add the primary camera image
+        if "image_primary" in observation_dict:
+            obs_dict["video.image_0"] = observation_dict["image_primary"]
+        
+        # show images
+        if self.show_images:
+            view_img(obs_dict)
+
+        # Extract robot state from proprio and split into individual components
+        if "proprio" in observation_dict:
+            proprio = observation_dict["proprio"]
+            assert len(proprio) == 7, "proprio should be size 7"
+            obs_dict["state.x"] = proprio[0:1].astype(np.float64)
+            obs_dict["state.y"] = proprio[1:2].astype(np.float64)
+            obs_dict["state.z"] = proprio[2:3].astype(np.float64)
+            obs_dict["state.roll"] = proprio[3:4].astype(np.float64)
+            obs_dict["state.pitch"] = proprio[4:5].astype(np.float64)
+            obs_dict["state.yaw"] = proprio[5:6].astype(np.float64)
+            obs_dict["state.pad"] = np.array([0.0]).astype(np.float64)
+            obs_dict["state.gripper"] = proprio[6:7].astype(np.float64)
+
+        obs_dict["annotation.human.task_description"] = lang
+
+        # then add a dummy dimension of np.array([1, ...]) to all the keys (assume history is 1)
+        for k in obs_dict:
+            if isinstance(obs_dict[k], np.ndarray):
+                obs_dict[k] = obs_dict[k][np.newaxis, ...]
+            else:
+                obs_dict[k] = [obs_dict[k]]
+
+        action_chunk = self.policy.get_action(obs_dict)
+
+        # Extract the first action from the action chunk and return as numpy array
+        # For SimplerEnv, we need a 7-dim action: [dx, dy, dz, droll, dpitch, dyaw, gripper]
+        action = self._convert_to_simpler_action(action_chunk, 0)
+        return action
+
+    def _convert_to_simpler_action(
+        self, action_chunk: dict[str, np.array], idx: int
+    ) -> np.ndarray:
+        """
+        Convert the action chunk to a numpy array for SimplerEnv
+        SimplerEnv expects a 7-dim action: [dx, dy, dz, droll, dpitch, dyaw, gripper]
+        """
+        # Extract individual action components, excluding the pad action
+        action_components = []
+        for key in self.modality_keys:
+            if key != "pad":  # Skip the padding component
+                action_value = action_chunk[f"action.{key}"][idx]
+                action_components.append(np.atleast_1d(action_value)[0])
+        
+        # Should be 7 components: x, y, z, roll, pitch, yaw, gripper
+        action_array = np.array(action_components, dtype=np.float32)
+        assert len(action_array) == 7, f"Expected 7-dim action, got {len(action_array)}"
+        return action_array
 
 ########################################################################
 
@@ -227,6 +326,7 @@ class BridgeSimplerStateWrapper(gym.Wrapper):
         return action_gripper
 
 
+
 ########################################################################
 
 if __name__ == "__main__":
@@ -235,7 +335,8 @@ if __name__ == "__main__":
     parser.add_argument("--test", action="store_true")
     parser.add_argument("--octo", action="store_true")
     parser.add_argument("--vla_url", type=str, default="http://100.76.193.18:6633/act")
-    parser.add_argument("--eval_count", type=int, default=10)
+    parser.add_argument("--groot_port", type=int, default=6699)
+    parser.add_argument("--eval_count", type=int, default=50)
     parser.add_argument("--episode_length", type=int, default=120)
     parser.add_argument("--output_video_dir", type=str, default=None)
     args = parser.parse_args()
@@ -243,7 +344,7 @@ if __name__ == "__main__":
     base_env = simpler_env.make(args.env)
     base_env._max_episode_steps = args.episode_length # override the max episode length
 
-    instruction = base_env.get_language_instruction()
+    instruction = base_env.unwrapped.get_language_instruction()
 
     env = WrapSimplerEnv(base_env)
 
@@ -260,6 +361,8 @@ if __name__ == "__main__":
 
             env = HistoryWrapper(env, horizon=2)
             env = TemporalEnsembleWrapper(env, 4)
+        elif args.groot_port:
+            policy = GR00TPolicy(port=args.groot_port)
         else:
             policy = OpenVLAPolicy(args.vla_url)
 

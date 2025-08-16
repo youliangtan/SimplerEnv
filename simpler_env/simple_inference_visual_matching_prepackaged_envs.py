@@ -82,7 +82,7 @@ else:
 success_arr = []
 for ep_id in range(args.n_trajs):
     obs, reset_info = env.reset()
-    instruction = env.get_language_instruction()
+    instruction = env.unwrapped.get_language_instruction()
     # for long-horizon environments, we check if the current subtask is the final subtask
     is_final_subtask = env.is_final_subtask() 
 
@@ -107,7 +107,7 @@ for ep_id in range(args.n_trajs):
             np.concatenate([action["world_vector"], action["rot_axangle"], action["gripper"]]),
         )
         print(timestep, info)
-        new_instruction = env.get_language_instruction()
+        new_instruction = env.unwrapped.get_language_instruction()
         if new_instruction != instruction:
             # update instruction for long horizon tasks
             instruction = new_instruction

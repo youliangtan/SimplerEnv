@@ -91,7 +91,7 @@ def run_maniskill2_eval_single_episode(
         task_description = instruction
     else:
         # get default language instruction
-        task_description = env.get_language_instruction()
+        task_description = env.unwrapped.get_language_instruction()
     print(task_description)
 
     # Initialize logging
@@ -124,7 +124,7 @@ def run_maniskill2_eval_single_episode(
         )
         
         success = "success" if done else "failure"
-        new_task_description = env.get_language_instruction()
+        new_task_description = env.unwrapped.get_language_instruction()
         if new_task_description != task_description:
             task_description = new_task_description
             print(task_description)
