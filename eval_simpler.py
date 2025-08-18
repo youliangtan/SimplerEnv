@@ -114,90 +114,97 @@ class OctoPolicy:
 
 
 class GR00TPolicy:
-    """The exact keys used is defined in modality.json
-
-    This currently only supports so100_follower, so101_follower
-    modify this code to support other robots with other keys based on modality.json
+    """GR00T Policy wrapper for SimplerEnv environments.
     
-    TODO: use https://huggingface.co/ShuaiYang03/GR00T-N1.5-Lerobot-SimplerEnv-BridgeV2
+    Supports WidowX and Google robots with appropriate observation and action processing.
+    Compatible with GR00T models from HuggingFace, with commit hash: aa6441feb4f08233d55cbfd2082753cdc01fa676
+    - ShuaiYang03/GR00T-N1.5-Lerobot-SimplerEnv-BridgeV2  
+    - ShuaiYang03/GR00T-N1.5-Lerobot-SimplerEnv-Fractal
     """
 
-    def __init__(
-        self,
-        host="localhost",
-        port=5555,
-        camera_keys=[],
-        robot_state_keys=[],
-        show_images=False,
-    ):
+    ROBOT_CONFIGS = {
+        "widowx": {
+            "camera_key": "video.image_0",
+            "proprio_size": 7,
+            "state_keys": ["x", "y", "z", "roll", "pitch", "yaw", "gripper"]
+        },
+        "google": {
+            "camera_key": "video.image", 
+            "proprio_size": 8,
+            "state_keys": ["x", "y", "z", "rx", "ry", "rz", "rw", "gripper"]
+        }
+    }
+    
+    def __init__(self, host="localhost", port=5555, show_images=False, robot_type="widowx"):
         from service import ExternalRobotInferenceClient
-
+        
+        if robot_type not in self.ROBOT_CONFIGS:
+            raise ValueError(f"Unsupported robot_type: {robot_type}. Supported: {list(self.ROBOT_CONFIGS.keys())}")
+            
         self.policy = ExternalRobotInferenceClient(host=host, port=port)
-        self.camera_keys = camera_keys
-        self.robot_state_keys = robot_state_keys
         self.show_images = show_images
-        # Remove the assertion for robot_state_keys as we'll handle it differently
-        # assert (
-        #     len(robot_state_keys) == 6
-        # ), f"robot_state_keys should be size 6, but got {len(robot_state_keys)} "
-        self.modality_keys = ["x", "y", "z", "roll", "pitch", "yaw", "pad", "gripper"]
+        self.robot_type = robot_type
+        self.config = self.ROBOT_CONFIGS[robot_type]
+        self.action_keys = ["x", "y", "z", "roll", "pitch", "yaw", "gripper"]
 
     def get_action(self, observation_dict, lang: str):
-        # Handle the actual observation format from SimplerEnv
-        obs_dict = {}
-        
-        # Add the primary camera image
-        if "image_primary" in observation_dict:
-            obs_dict["video.image_0"] = observation_dict["image_primary"]
-        
-        # show images
-        if self.show_images:
-            view_img(obs_dict)
-
-        # Extract robot state from proprio and split into individual components
-        if "proprio" in observation_dict:
-            proprio = observation_dict["proprio"]
-            assert len(proprio) == 7, "proprio should be size 7"
-            obs_dict["state.x"] = proprio[0:1].astype(np.float64)
-            obs_dict["state.y"] = proprio[1:2].astype(np.float64)
-            obs_dict["state.z"] = proprio[2:3].astype(np.float64)
-            obs_dict["state.roll"] = proprio[3:4].astype(np.float64)
-            obs_dict["state.pitch"] = proprio[4:5].astype(np.float64)
-            obs_dict["state.yaw"] = proprio[5:6].astype(np.float64)
-            obs_dict["state.pad"] = np.array([0.0]).astype(np.float64)
-            obs_dict["state.gripper"] = proprio[6:7].astype(np.float64)
-
-        obs_dict["annotation.human.task_description"] = lang
-
-        # then add a dummy dimension of np.array([1, ...]) to all the keys (assume history is 1)
-        for k in obs_dict:
-            if isinstance(obs_dict[k], np.ndarray):
-                obs_dict[k] = obs_dict[k][np.newaxis, ...]
-            else:
-                obs_dict[k] = [obs_dict[k]]
-
+        """Get action from GR00T policy given observation and language instruction."""
+        obs_dict = self._process_observation(observation_dict, lang)
         action_chunk = self.policy.get_action(obs_dict)
+        return self._convert_to_simpler_action(action_chunk, 0)
+    
+    def _process_observation(self, observation_dict, lang: str):
+        """Convert SimplerEnv observation to GR00T format."""
+        obs_dict = {}
 
-        # Extract the first action from the action chunk and return as numpy array
-        # For SimplerEnv, we need a 7-dim action: [dx, dy, dz, droll, dpitch, dyaw, gripper]
-        action = self._convert_to_simpler_action(action_chunk, 0)
-        return action
+        # Add camera image
+        obs_dict[self.config["camera_key"]] = observation_dict["image_primary"]
 
-    def _convert_to_simpler_action(
-        self, action_chunk: dict[str, np.array], idx: int
-    ) -> np.ndarray:
-        """
-        Convert the action chunk to a numpy array for SimplerEnv
-        SimplerEnv expects a 7-dim action: [dx, dy, dz, droll, dpitch, dyaw, gripper]
-        """
-        # Extract individual action components, excluding the pad action
-        action_components = []
-        for key in self.modality_keys:
-            if key != "pad":  # Skip the padding component
-                action_value = action_chunk[f"action.{key}"][idx]
-                action_components.append(np.atleast_1d(action_value)[0])
+        # Show images for debugging if enabled
+        if self.show_images:
+            view_img({self.config["camera_key"]: obs_dict[self.config["camera_key"]]})
+
+        # Process proprioceptive state
+        proprio = observation_dict["proprio"]
+        expected_size = self.config["proprio_size"]
+        assert len(proprio) == expected_size, f"Expected proprio size {expected_size}, got {len(proprio)}"
         
-        # Should be 7 components: x, y, z, roll, pitch, yaw, gripper
+        # Map proprio components to state keys
+        state_keys = self.config["state_keys"]
+        for i, key in enumerate(state_keys):
+            obs_dict[f"state.{key}"] = proprio[i:i+1].astype(np.float64)
+            
+        # Add padding for WidowX (required by model)
+        if self.robot_type == "widowx":
+            obs_dict["state.pad"] = np.array([0.0]).astype(np.float64)
+        
+        # Add task description
+        obs_dict["annotation.human.task_description"] = lang
+        
+        # Add batch dimension (history=1)
+        for key, value in obs_dict.items():
+            if isinstance(value, np.ndarray):
+                obs_dict[key] = value[np.newaxis, ...]
+            else:
+                obs_dict[key] = [value]
+                
+        return obs_dict
+
+    def _convert_to_simpler_action(self, action_chunk: dict[str, np.array], idx: int = 0) -> np.ndarray:
+        """Convert GR00T action chunk to SimplerEnv format.
+
+        Args:
+            action_chunk: Dictionary of action components from GR00T policy
+            idx: Index of action to extract from chunk (default: 0 for first action)
+
+        Returns:
+            7-dim numpy array: [dx, dy, dz, droll, dpitch, dyaw, gripper]
+        """
+        action_components = [
+            np.atleast_1d(action_chunk[f"action.{key}"][idx])[0] 
+            for key in self.action_keys
+        ]
+        
         action_array = np.array(action_components, dtype=np.float32)
         assert len(action_array) == 7, f"Expected 7-dim action, got {len(action_array)}"
         return action_array
@@ -206,12 +213,12 @@ class GR00TPolicy:
 
 
 class WrapSimplerEnv(gym.Wrapper):
-    def __init__(self, env):
+    def __init__(self, env, image_size=(256, 256)):
         super(WrapSimplerEnv, self).__init__(env)
         self.observation_space = gym.spaces.Dict(
             {
                 "image_primary": gym.spaces.Box(
-                    low=0, high=255, shape=(256, 256, 3), dtype=np.uint8
+                    low=0, high=255, shape=(image_size[0], image_size[1], 3), dtype=np.uint8
                 ),
                 "proprio": gym.spaces.Box(
                     low=-np.inf, high=np.inf, shape=(8,), dtype=np.float32
@@ -221,6 +228,7 @@ class WrapSimplerEnv(gym.Wrapper):
         self.action_space = gym.spaces.Box(
             low=-1, high=1, shape=(7,), dtype=np.float32
         )
+        self.image_size = image_size
 
     def reset(self):
         obs, reset_info = self.env.reset()
@@ -244,14 +252,14 @@ class WrapSimplerEnv(gym.Wrapper):
         proprio = self._process_proprio(obs)
         return (
             {
-                "image_primary": cv2.resize(img, (256, 256)),
+                "image_primary": cv2.resize(img, self.image_size),
                 "proprio": proprio,
             }, 
             {
                 "original_image_primary": img,
             }
         )
-    
+
     def _process_proprio(self, obs):
         """
         Process proprioceptive information
@@ -261,6 +269,76 @@ class WrapSimplerEnv(gym.Wrapper):
         eef_pose = obs['agent']["eef_pos"]
         # joint_angles = obs['agent']['qpos'] # 8-dim vector joint angles
         return eef_pose
+
+
+########################################################################
+
+# action were post processed in the original simpler env code
+#  https://github.com/simpler-env/SimplerEnv/blob/4ab7178e83e84ee06894034ec6dbf9e7aad1e882/simpler_env/policies/octo/octo_model.py#L187-L242
+
+class GoogleSimplerActionWrapper(gym.Wrapper):
+    def __init__(self, env):
+        super(GoogleSimplerActionWrapper, self).__init__(env)
+        self.previous_gripper_action = None
+        self.sticky_action_is_on = False
+        self.sticky_gripper_action = 0.0
+        self.gripper_action_repeat = 0
+        self.sticky_gripper_num_repeat = 15
+
+    def step(self, action):
+        action[-1] = self._postprocess_gripper(action[-1])
+        obs, reward, done, trunc, info = super().step(action)
+        obs["proprio"] = self._preprocess_proprio(obs["proprio"])
+        return obs, reward, done, trunc, info
+
+    def reset(self, **kwargs):
+        self.sticky_action_is_on = False
+        self.gripper_action_repeat = 0
+        self.sticky_gripper_action = 0.0
+        self.previous_gripper_action = None
+        return super().reset(**kwargs)
+
+    def _preprocess_proprio(self, proprio: np.array) -> np.array:
+        # gripper, the last dimension is handled in the postprocess_gripper
+        quat_xyzw = np.roll(proprio[3:7], -1)
+        gripper_closedness = (1 - proprio[7])
+        raw_proprio = np.concatenate(
+            (
+                proprio[:3],
+                quat_xyzw,
+                [gripper_closedness],
+            )
+        )
+        return raw_proprio
+
+    def _postprocess_gripper(self, current_gripper_action: float) -> float:
+        current_gripper_action = (current_gripper_action * 2) - 1  # [0, 1] -> [-1, 1] -1 close, 1 open
+
+        # without sticky
+        relative_gripper_action = -current_gripper_action
+        # if self.previous_gripper_action is None:
+        #     relative_gripper_action = -1  # open
+        # else:
+        #     relative_gripper_action = -current_gripper_action
+        # self.previous_gripper_action = current_gripper_action
+
+        # switch to sticky closing
+        if np.abs(relative_gripper_action) > 0.5 and self.sticky_action_is_on is False:
+            self.sticky_action_is_on = True
+            self.sticky_gripper_action = relative_gripper_action
+
+        # sticky closing
+        if self.sticky_action_is_on:
+            self.gripper_action_repeat += 1
+            relative_gripper_action = self.sticky_gripper_action
+
+        # reaching maximum sticky
+        if self.gripper_action_repeat == self.sticky_gripper_num_repeat:
+            self.sticky_action_is_on = False
+            self.gripper_action_repeat = 0
+            self.sticky_gripper_action = 0.0
+
+        return relative_gripper_action
 
 
 class BridgeSimplerStateWrapper(gym.Wrapper):
@@ -351,6 +429,10 @@ if __name__ == "__main__":
     if "widowx" in args.env:
         print("Wrap Simpler with bridge state wrapper for proprio and action convention")
         env = BridgeSimplerStateWrapper(env)
+    elif "google" in args.env:
+        print("Wrap Simpler with google action wrapper for sticky gripper")
+        env.image_size = (320, 256) # wrap the image size to "320, 256"
+        env = GoogleSimplerActionWrapper(env)
 
     print("Instruction", instruction)
 
@@ -362,7 +444,12 @@ if __name__ == "__main__":
             env = HistoryWrapper(env, horizon=2)
             env = TemporalEnsembleWrapper(env, 4)
         elif args.groot_port:
-            policy = GR00TPolicy(port=args.groot_port)
+            if "widowx" in args.env:
+                policy = GR00TPolicy(port=args.groot_port, robot_type="widowx")
+            elif "google" in args.env:
+                policy = GR00TPolicy(port=args.groot_port, robot_type="google")
+            else:
+                raise ValueError("robot type not supported")
         else:
             policy = OpenVLAPolicy(args.vla_url)
 
@@ -385,6 +472,8 @@ if __name__ == "__main__":
 
             if args.output_video_dir:
                 images.append(image)
+
+            instruction = base_env.unwrapped.get_language_instruction()
 
             # show image
             full_image = info["original_image_primary"]
