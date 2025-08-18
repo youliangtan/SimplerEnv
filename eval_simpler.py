@@ -13,6 +13,17 @@ python eval_simpler.py --env widowx_close_drawer --vla_url http://XXX.XXX.XXX.XX
 python eval_simpler.py --env widowx_open_drawer --octo
 python eval_simpler.py --env widowx_close_drawer --octo
 
+
+# Example: GR00T policy
+# Uses external GR00T models from HuggingFace, with commit hash: aa6441feb4f08233d55cbfd2082753cdc01fa676
+# - ShuaiYang03/GR00T-N1.5-Lerobot-SimplerEnv-BridgeV2  
+# - ShuaiYang03/GR00T-N1.5-Lerobot-SimplerEnv-Fractal
+
+python scripts/inference_service.py \
+    --model_path ShuaiYang03/GR00T-N1.5-Lerobot-SimplerEnv-Fractal\
+    --server --data_config fractal  --embodiment_tag oxe --denoising-steps 8  --port 6699
+
+python eval_simpler.py --env google_robot_pick_object --groot_port 6699
 """
 
 import simpler_env
@@ -117,9 +128,6 @@ class GR00TPolicy:
     """GR00T Policy wrapper for SimplerEnv environments.
     
     Supports WidowX and Google robots with appropriate observation and action processing.
-    Compatible with GR00T models from HuggingFace, with commit hash: aa6441feb4f08233d55cbfd2082753cdc01fa676
-    - ShuaiYang03/GR00T-N1.5-Lerobot-SimplerEnv-BridgeV2  
-    - ShuaiYang03/GR00T-N1.5-Lerobot-SimplerEnv-Fractal
     """
 
     ROBOT_CONFIGS = {
