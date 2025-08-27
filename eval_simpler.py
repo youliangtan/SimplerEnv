@@ -15,15 +15,17 @@ python eval_simpler.py --env widowx_close_drawer --octo
 
 
 # Example: GR00T policy
-# Uses external GR00T models from HuggingFace, with commit hash: aa6441feb4f08233d55cbfd2082753cdc01fa676
-# - ShuaiYang03/GR00T-N1.5-Lerobot-SimplerEnv-BridgeV2  
-# - ShuaiYang03/GR00T-N1.5-Lerobot-SimplerEnv-Fractal
+
+youliangtan/gr00t-n1.5-bridge-posttrain
+youliangtan/gr00t-n1.5-fractal-posttrain
 
 python scripts/inference_service.py \
-    --model_path ShuaiYang03/GR00T-N1.5-Lerobot-SimplerEnv-Fractal\
-    --server --data_config fractal  --embodiment_tag oxe --denoising-steps 8  --port 6699
+    --embodiment_tag new_embodiment --denoising-steps 8 \
+    --data_config examples.simpler_env.custom_data_config:FractalDataConfig \
+    --model_path youliangtan/gr00t-n1.5-fractal-posttrain \
+    --server --port 7799
 
-python eval_simpler.py --env google_robot_pick_object --groot_port 6699
+python eval_simpler.py --env google_robot_pick_object --groot_port 7799
 """
 
 import simpler_env
@@ -91,7 +93,7 @@ class OpenVLAPolicy:
 ########################################################################
 
 class OctoPolicy:
-    def __init__(self, horizon=2):
+    def __init__(self):
         from octo.model.octo_model import OctoModel
         self.model = OctoModel.load_pretrained("hf://rail-berkeley/octo-small")
         self.task = None  # created later
@@ -143,7 +145,7 @@ class GR00TPolicy:
         }
     }
     
-    def __init__(self, host="localhost", port=5555, show_images=False, robot_type="widowx"):
+    def __init__(self, host="localhost", port=5555, show_images=False, robot_type="widowx", action_horizon=1):
         from service import ExternalRobotInferenceClient
         
         if robot_type not in self.ROBOT_CONFIGS:
@@ -154,12 +156,20 @@ class GR00TPolicy:
         self.robot_type = robot_type
         self.config = self.ROBOT_CONFIGS[robot_type]
         self.action_keys = ["x", "y", "z", "roll", "pitch", "yaw", "gripper"]
+        self.action_horizon = action_horizon
 
     def get_action(self, observation_dict, lang: str):
         """Get action from GR00T policy given observation and language instruction."""
         obs_dict = self._process_observation(observation_dict, lang)
         action_chunk = self.policy.get_action(obs_dict)
-        return self._convert_to_simpler_action(action_chunk, 0)
+        if self.action_horizon == 1:
+            return self._convert_to_simpler_action(action_chunk, 0)
+        else:
+            actions = []
+            for i in range(self.action_horizon):
+                actions.append(self._convert_to_simpler_action(action_chunk, i))
+            actions = np.stack(actions, axis=0)
+            return actions
     
     def _process_observation(self, observation_dict, lang: str):
         """Convert SimplerEnv observation to GR00T format."""
@@ -425,6 +435,8 @@ if __name__ == "__main__":
     parser.add_argument("--eval_count", type=int, default=50)
     parser.add_argument("--episode_length", type=int, default=120)
     parser.add_argument("--output_video_dir", type=str, default=None)
+    parser.add_argument("--headless", action="store_true")
+    parser.add_argument("--action_horizon", type=int, default=1)
     args = parser.parse_args()
 
     base_env = simpler_env.make(args.env)
@@ -449,15 +461,11 @@ if __name__ == "__main__":
             policy = OctoPolicy()
             from octo.utils.gym_wrappers import HistoryWrapper, TemporalEnsembleWrapper
 
-            env = HistoryWrapper(env, horizon=2)
+            env = HistoryWrapper(env, horizon=2)  # Expects action_horizon to be 2 for octo
             env = TemporalEnsembleWrapper(env, 4)
         elif args.groot_port:
-            if "widowx" in args.env:
-                policy = GR00TPolicy(port=args.groot_port, robot_type="widowx")
-            elif "google" in args.env:
-                policy = GR00TPolicy(port=args.groot_port, robot_type="google")
-            else:
-                raise ValueError("robot type not supported")
+            robot_type = "widowx" if "widowx" in args.env else "google"
+            policy = GR00TPolicy(port=args.groot_port, robot_type=robot_type, action_horizon=args.action_horizon)
         else:
             policy = OpenVLAPolicy(args.vla_url)
 
@@ -483,20 +491,27 @@ if __name__ == "__main__":
 
             instruction = base_env.unwrapped.get_language_instruction()
 
-            # show image
-            full_image = info["original_image_primary"]
-            cv2.imshow("Image", cv2.cvtColor(full_image, cv2.COLOR_RGB2BGR))
-            if cv2.waitKey(10) & 0xFF == ord("q"):
-                break
-
             if args.test:
                 # random action
-                action = env.action_space.sample()
+                actions = env.action_space.sample()
             else:
-                action = policy.get_action(obs, instruction)
+                actions = policy.get_action(obs, instruction)
 
             # print(f"Step {step_count} Action: {action}")
-            obs, reward, done, truncated, info = env.step(action)
+            # show image
+            for j in range(args.action_horizon):
+                action = actions if args.action_horizon == 1 else actions[j]
+                obs, reward, done, truncated, info = env.step(action)
+
+                if not args.headless:
+                    full_image = info["original_image_primary"]
+                    cv2.imshow("Image", cv2.cvtColor(full_image, cv2.COLOR_RGB2BGR))
+                    if cv2.waitKey(10) & 0xFF == ord("q"):
+                        truncated = True
+
+                if done or truncated:
+                    break
+
             step_count += 1
 
         # check if the episode is successful
