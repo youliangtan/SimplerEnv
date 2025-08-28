@@ -32,6 +32,7 @@ import simpler_env
 from simpler_env.utils.env.observation_utils import get_image_from_maniskill2_obs_dict
 import cv2
 import numpy as np
+import json
 
 # for openvla api call
 import requests
@@ -67,6 +68,64 @@ def view_img(obs_dict):
             cv2.imshow(f"Debug {key}", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
             cv2.waitKey(1)
 
+
+def _parse_kv_list(kvs):
+    out = {}
+    for kv in kvs or []:
+        if "=" not in kv:
+            continue
+        k, v = kv.split("=", 1)
+        v = v.strip()
+        if v.lower() in ("true", "false"):
+            out[k] = v.lower() == "true"
+        else:
+            try:
+                out[k] = float(v) if "." in v else int(v)
+            except ValueError:
+                out[k] = v
+    return out
+
+
+def get_maniskill2_env(robot_type, env_name, scene_name,
+        env_reset_options=None,
+        additional_env_build_kwargs=None,
+        control_freq=3,
+        sim_freq=513,
+        max_episode_steps=80,
+        rgb_overlay_path=None,
+    ):
+
+    from simpler_env.utils.env.env_builder import build_maniskill2_env
+    assert robot_type in ("google", "widowx"), f"Only `google` and `widowx` are supported."
+
+    if robot_type == "google":
+        control_mode = (
+            "arm_pd_ee_delta_pose_align_interpolate_by_planner_gripper_pd_joint_target_delta_pos_interpolate_by_planner"
+        )
+    elif robot_type == "widowx":
+        control_mode = "arm_pd_ee_target_delta_pose_align2_gripper_pd_joint_pos"
+    else:
+        raise NotImplementedError(f"Robot {robot_type} not supported")
+
+    kwargs = dict(
+        obs_mode="rgbd",
+        # Map to what maniskill2 internal APIs require.
+        robot="google_robot_static" if robot_type == "google" else "widowx",
+        sim_freq=sim_freq,
+        control_mode=control_mode,
+        control_freq=control_freq,
+        max_episode_steps=max_episode_steps,
+        scene_name=scene_name,
+        camera_cfgs={"add_segmentation": True},
+        rgb_overlay_path=rgb_overlay_path,
+    )
+    env = build_maniskill2_env(
+        env_name,
+        **additional_env_build_kwargs,
+        **kwargs,
+    )
+    env.reset(options=env_reset_options)
+    return env
 
 ########################################################################
 class OpenVLAPolicy:
@@ -248,8 +307,8 @@ class WrapSimplerEnv(gym.Wrapper):
         )
         self.image_size = image_size
 
-    def reset(self):
-        obs, reset_info = self.env.reset()
+    def reset(self, **kwargs):
+        obs, reset_info = self.env.reset(**kwargs)
         obs, additional_info = self._process_obs(obs)
         reset_info.update(additional_info)
         return obs, reset_info
@@ -266,7 +325,10 @@ class WrapSimplerEnv(gym.Wrapper):
         return obs, reward, done, truncated, info
 
     def _process_obs(self, obs):
-        img = get_image_from_maniskill2_obs_dict(self.env, obs)
+        img = get_image_from_maniskill2_obs_dict(self.env, obs, camera_name=None)
+        image_path = f"images/0.png"
+        os.makedirs(os.path.dirname(image_path), exist_ok=True)
+        cv2.imwrite(image_path, img)
         proprio = self._process_proprio(obs)
         return (
             {
@@ -427,7 +489,12 @@ class BridgeSimplerStateWrapper(gym.Wrapper):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", type=str, default="widowx_close_drawer")
+    # Either supply with `env` or `robot_type` + `env_name` + `scene_name`.
+    parser.add_argument("--env", type=str, default=None)
+    parser.add_argument("--robot_type", type=str, default=None)
+    parser.add_argument("--env_name", type=str, default=None)
+    parser.add_argument("--scene_name", type=str, default=None)
+
     parser.add_argument("--test", action="store_true")
     parser.add_argument("--octo", action="store_true")
     parser.add_argument("--vla_url", type=str, default="http://100.76.193.18:6633/act")
@@ -437,19 +504,36 @@ if __name__ == "__main__":
     parser.add_argument("--output_video_dir", type=str, default=None)
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--action_horizon", type=int, default=1)
+
+    parser.add_argument("--additional_env_build_kwargs", nargs="*", default=[],
+                    help='Extra key=val pairs for env build (e.g. lr_switch=True distractor_config=more)')
+    
+    parser.add_argument("--env_reset_options", type=json.loads, default=None)
+    parser.add_argument("--rgb_overlay_path", type=str, default=None)
     args = parser.parse_args()
 
-    base_env = simpler_env.make(args.env)
+    robot_type = None
+    if args.env:
+        assert args.robot_type is None and args.env_name is None and args.scene_name is None, "Either supply with `env` or `robot_type` + `env_name` + `scene_name`. But not both."
+        base_env = simpler_env.make(args.env)
+        robot_type = "google" if "google" in args.env else "widowx"
+    else:
+        assert args.robot_type is not None and args.env_name is not None and args.scene_name is not None, "Either supply with `env` or `robot_type` + `env_name` + `scene_name`. But not both."
+        build_kwargs = _parse_kv_list(args.additional_env_build_kwargs)
+        robot_type = args.robot_type
+        assert robot_type in ["google", "widowx"], f"Only `google` and `widowx` are supported."
+        base_env = get_maniskill2_env(robot_type, args.env_name, args.scene_name, args.env_reset_options, build_kwargs, max_episode_steps=args.episode_length, rgb_overlay_path=args.rgb_overlay_path)
+
     base_env._max_episode_steps = args.episode_length # override the max episode length
 
     instruction = base_env.unwrapped.get_language_instruction()
 
     env = WrapSimplerEnv(base_env)
 
-    if "widowx" in args.env:
+    if robot_type == "widowx":
         print("Wrap Simpler with bridge state wrapper for proprio and action convention")
         env = BridgeSimplerStateWrapper(env)
-    elif "google" in args.env:
+    elif robot_type == "google":
         print("Wrap Simpler with google action wrapper for sticky gripper")
         env.image_size = (320, 256) # wrap the image size to "320, 256"
         env = GoogleSimplerActionWrapper(env)
@@ -464,7 +548,6 @@ if __name__ == "__main__":
             env = HistoryWrapper(env, horizon=2)  # Expects action_horizon to be 2 for octo
             env = TemporalEnsembleWrapper(env, 4)
         elif args.groot_port:
-            robot_type = "widowx" if "widowx" in args.env else "google"
             policy = GR00TPolicy(port=args.groot_port, robot_type=robot_type, action_horizon=args.action_horizon)
         else:
             policy = OpenVLAPolicy(args.vla_url)
@@ -475,7 +558,7 @@ if __name__ == "__main__":
         print_green(f"Evaluate Episode {i}")
 
         done, truncated = False, False
-        obs, info = env.reset()
+        obs, info = env.reset(options=args.env_reset_options)
 
         images = []
 
