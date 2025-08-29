@@ -11,7 +11,7 @@ LOG_FILE="logs/evaluation_results-${PORT}.log"
 
 # TODO: Add more!!!!!!!!!!!!!
 read -r -d '' COMMANDS <<EOF
-python eval_simpler.py --env_name OpenDrawerCustomInScene-v0 --scene_name frl_apartment_stage_simple --env_reset_options $(cat env_reset_options1.json) --additional_env_build_kwargs station_name=mk_station_recolor light_mode=simple disable_bad_material=True urdf_version=recolor_cabinet_visual_matching_1 shader_dir=rt --episode_length 300
+python eval_simpler.py --env_name OpenDrawerCustomInScene-v0 --scene_name frl_apartment_stage_simple --robot_init_x_range 0.65 0.85 3 --robot_init_y_range -0.2 0.2 3 --robot_init_rot_quat_center 0 0 0 1 --robot_init_rot_rpy_range 0 0 1 0 0 1 0.0 0.0 1 --obj_init_x_range 0 0 1 --obj_init_y_range 0 0 1 --additional_env_build_kwargs station_name=mk_station_recolor light_mode=simple disable_bad_material=True urdf_version=recolor_cabinet_visual_matching_1 shader_dir=rt --episode_length 300
 
 EOF
 # ----------------------------------
