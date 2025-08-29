@@ -532,6 +532,8 @@ class BridgeSimplerStateWrapper(gym.Wrapper):
 
 
 def run_one(env, env_reset_options, args) -> int:
+    print(f"Evaluate with reset options: {env_reset_options}")
+    success_count = 0
     for i in range(args.eval_count):
         print_green(f"Evaluate Episode {i}")
 
@@ -597,7 +599,8 @@ def run_one(env, env_reset_options, args) -> int:
         print("Episode stats", episode_stats)
         print_green(f"Success rate: {success_count}/{i + 1}")
 
-        return success_count
+    print(f"env_reset_options: {env_reset_options} Success rate: {success_count}/{args.eval_count}")
+    return success_count
 
 
 ########################################################################
