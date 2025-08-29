@@ -531,7 +531,7 @@ class BridgeSimplerStateWrapper(gym.Wrapper):
         return action_gripper
 
 
-def run_one(env, env_reset_options, args) -> int:
+def run_eval_per_setting(env, env_reset_options, args) -> int:
     print(f"Evaluate with reset options: {env_reset_options}")
     success_count = 0
     for i in range(args.eval_count):
@@ -705,7 +705,7 @@ if __name__ == "__main__":
 
     aggr_eval_count = 0
     for reset_options in iter_env_resets(args):
-        success_count += run_one(env, reset_options, args)
+        success_count += run_eval_per_setting(env, reset_options, args)
         aggr_eval_count += args.eval_count
 
     print(f"Final Success rate: {success_count}/{aggr_eval_count}")

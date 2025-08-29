@@ -32,6 +32,7 @@ python eval_simpler.py
   --obj_init_y_range 0 0 1
   --additional_env_build_kwargs light_mode=simple shader_dir=rt
   --episode_length 300
+  --eval_count 1
 CMD
 
 add_cmd <<'CMD'
@@ -46,6 +47,7 @@ python eval_simpler.py
   --obj_init_y_range 0 0 1
   --additional_env_build_kwargs light_mode=simple shader_dir=rt
   --episode_length 300
+  --eval_count 1
 CMD
 
 # Add more blocks as needed:
