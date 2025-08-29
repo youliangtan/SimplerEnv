@@ -90,6 +90,8 @@ def _parse_kv_list(kvs):
 
 
 def parse_range_tuple(t):
+    if not t:
+        return []
     return np.linspace(t[0], t[1], int(t[2]))
 
 

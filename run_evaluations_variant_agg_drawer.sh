@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Usage: bash run_evals_loop_style.sh [PORT]
-# Example: bash run_evals_loop_style.sh 5556
+# Usage: bash run_evaluations_variant_agg_drawer.sh [PORT]
+# Example: bash run_evaluations_variant_agg_drawer.sh 5556
 
 set -euo pipefail
 
 PORT="${1:-5556}"
 ROBOT_TYPE="google"
 LOG_DIR="logs"
-LOG_FILE="${LOG_DIR}/evaluation_results-${PORT}.log"
+LOG_FILE="${LOG_DIR}/evaluation_results-drawer-${PORT}.log"
 mkdir -p "${LOG_DIR}"
 : > "${LOG_FILE}"
 
@@ -22,22 +22,6 @@ COMMON_ARGS=(
   --obj_init_y_range 0 0 1
   --episode_length 300
   --eval_count 1
-)
-
-# Environments to evaluate
-env_names=(
-  OpenTopDrawerCustomInScene-v0
-  OpenMiddleDrawerCustomInScene-v0
-  OpenBottomDrawerCustomInScene-v0
-  CloseTopDrawerCustomInScene-v0
-  CloseMiddleDrawerCustomInScene-v0
-  CloseBottomDrawerCustomInScene-v0
-)
-
-# Background variants
-background_scenes=(
-  modern_bedroom_no_roof
-  modern_office_no_roof
 )
 
 # Helper to run one eval (env + scene + extra args)
@@ -89,20 +73,34 @@ run_eval() {
 echo "Starting evaluations on port ${PORT}..." | tee -a "${LOG_FILE}"
 echo "======================================" | tee -a "${LOG_FILE}"
 
-# -------------------- Section 1: Base scene with ray-tracing --------------------
-# Note: shader_dir=rt turns on ray-tracing rendering (policies often rely on shadows for depth cues)
+# -------------------- Section 1: Base scene --------------------
+# Environments to evaluate
+env_names=(
+  OpenTopDrawerCustomInScene-v0
+  OpenMiddleDrawerCustomInScene-v0
+  OpenBottomDrawerCustomInScene-v0
+  CloseTopDrawerCustomInScene-v0
+  CloseMiddleDrawerCustomInScene-v0
+  CloseBottomDrawerCustomInScene-v0
+)
+
 for env_name in "${env_names[@]}"; do
   run_eval "$env_name" "frl_apartment_stage_simple" "--additional_env_build_kwargs shader_dir=rt"
 done
 
-# -------------------- Section 2: Background scenes (with ray-tracing shader) ----
+# -------------------- Section 2: Backgrounds ----
+# Background variants
+background_scenes=(
+  modern_bedroom_no_roof
+  modern_office_no_roof
+)
 for scene_name in "${background_scenes[@]}"; do
   for env_name in "${env_names[@]}"; do
     run_eval "$env_name" "$scene_name" "--additional_env_build_kwargs shader_dir=rt"
   done
 done
 
-# -------------------- Section 3: Lighting variants (same base scene) ------------
+# -------------------- Section 3: Lighting ------------
 for env_name in "${env_names[@]}"; do
   run_eval "$env_name" "frl_apartment_stage_simple" "--additional_env_build_kwargs shader_dir=rt light_mode=brighter"
   run_eval "$env_name" "frl_apartment_stage_simple" "--additional_env_build_kwargs shader_dir=rt light_mode=darker"
