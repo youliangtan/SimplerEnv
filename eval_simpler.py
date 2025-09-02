@@ -654,9 +654,9 @@ if __name__ == "__main__":
     args.robot_init_xs = parse_range_tuple(args.robot_init_x_range)
     args.robot_init_ys = parse_range_tuple(args.robot_init_y_range)
     args.robot_init_quats = []
-    for r in parse_range_tuple(args.robot_init_rot_rpy_range[:3]):
-        for p in parse_range_tuple(args.robot_init_rot_rpy_range[3:6]):
-            for y in parse_range_tuple(args.robot_init_rot_rpy_range[6:]):
+    for r in parse_range_tuple(args.robot_init_rot_rpy_range[:3] if args.robot_init_rot_rpy_range else None):
+        for p in parse_range_tuple(args.robot_init_rot_rpy_range[3:6] if args.robot_init_rot_rpy_range else None):
+            for y in parse_range_tuple(args.robot_init_rot_rpy_range[6:] if args.robot_init_rot_rpy_range else None):
                 args.robot_init_quats.append((Pose(q=euler2quat(r, p, y)) * Pose(q=args.robot_init_rot_quat_center)).q)
     # env args: object position
     args.obj_init_xs = parse_range_tuple(args.obj_init_x_range)

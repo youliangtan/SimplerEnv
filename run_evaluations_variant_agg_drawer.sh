@@ -26,7 +26,7 @@ COMMON_ARGS=(
   --robot_init_rot_rpy_range 0 0 1 0 0 1 0.0 0.0 1
   --obj_init_x_range 0 0 1
   --obj_init_y_range 0 0 1
-  --episode_length 118
+  --episode_length 113
   --eval_count 1
 )
 
