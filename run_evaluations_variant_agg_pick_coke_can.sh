@@ -5,11 +5,16 @@
 set -euo pipefail
 
 PORT="${1:-5556}"
+shift  # Remove PORT from arguments
 ROBOT_TYPE="google"
 LOG_DIR="logs"
 LOG_FILE="${LOG_DIR}/evaluation_results-pick_coke_can-${PORT}.log"
 mkdir -p "${LOG_DIR}"
 : > "${LOG_FILE}"
+
+# Capture any additional arguments passed to the script
+SCRIPT_ARGS=("$@")
+echo "Script arguments: ${SCRIPT_ARGS[*]}"
 
 # -------------------- Config --------------------
 # Common args (for eval_simpler.py)
@@ -38,6 +43,7 @@ run_eval() {
     "${COMMON_ARGS[@]}"
     --robot_type "$ROBOT_TYPE"
     --groot_port "$PORT"
+    "${SCRIPT_ARGS[@]}"
   )
 
   # Append extra args (tokenized)
