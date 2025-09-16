@@ -254,8 +254,17 @@ class GR00TPolicy:
     }
     
     def __init__(self, host="localhost", port=5555, show_images=False, robot_type="widowx", action_horizon=1):
-        from service import ExternalRobotInferenceClient
+        # from service import ExternalRobotInferenceClient
+        # from gr00t.eval.service import ExternalRobotInferenceClient
+        # import from local path
         
+        # NOTE: We can ensure the `service.py` is in consistent as the one in Isaac-GR00T repo. THis can be done
+        # with the following code. while keeping them as different env. Else, copy the `service.py` to the local path.
+        # import sys
+        # import os
+        # sys.path.append(os.path.expanduser("~/Isaac-GR00T/gr00t/eval/"))
+        from service import ExternalRobotInferenceClient
+
         if robot_type not in self.ROBOT_CONFIGS:
             raise ValueError(f"Unsupported robot_type: {robot_type}. Supported: {list(self.ROBOT_CONFIGS.keys())}")
             

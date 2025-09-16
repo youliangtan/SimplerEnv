@@ -1,5 +1,3 @@
-"""NOTE THIS IS COPIED FROM https://github.com/NVIDIA/Isaac-GR00T/blob/main/gr00t/eval/service.py"""
-
 # SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -23,7 +21,6 @@ from typing import Any, Callable, Dict
 import msgpack
 import numpy as np
 import zmq
-import cv2
 
 try:
     from gr00t.data.dataset import ModalityConfig
@@ -49,7 +46,6 @@ class MsgSerializer:
 
     @staticmethod
     def encode_custom_classes(obj):
-        # Only check isinstance if ModalityConfig is a type
         if ModalityConfig is not None and isinstance(obj, ModalityConfig):
             return {"__ModalityConfig_class__": True, "as_json": obj.model_dump_json()}
         if isinstance(obj, np.ndarray):
@@ -58,12 +54,11 @@ class MsgSerializer:
             return {"__ndarray_class__": True, "as_npy": output.getvalue()}
         return obj
 
+
 @dataclass
 class EndpointHandler:
     handler: Callable
     requires_input: bool = True
-    arg_names: list[str] = None
-    default_args: dict = None
 
 
 class BaseInferenceServer:
@@ -96,14 +91,7 @@ class BaseInferenceServer:
         """
         return {"status": "ok", "message": "Server is running"}
 
-    def register_endpoint(
-        self,
-        name: str,
-        handler: Callable,
-        requires_input: bool = True,
-        arg_names: list[str] = None,
-        default_args: dict = None,
-    ):
+    def register_endpoint(self, name: str, handler: Callable, requires_input: bool = True):
         """
         Register a new endpoint to the server.
 
@@ -111,23 +99,8 @@ class BaseInferenceServer:
             name: The name of the endpoint.
             handler: The handler function that will be called when the endpoint is hit.
             requires_input: Whether the handler requires input data.
-            arg_names: List of argument names the handler expects. If None, all data will be passed as a single dict.
-            default_args: Default values for arguments that might not be provided.
-
-        Examples:
-            # Endpoint with no arguments
-            server.register_endpoint("ping", self._handle_ping, requires_input=False)
-
-            # Endpoint with single dict argument (backward compatibility)
-            server.register_endpoint("process_data", self._process_data)
-
-            # Endpoint with specific named arguments
-            server.register_endpoint("get_action", self._get_action, arg_names=["observations", "config"])
-
-            # Endpoint with default values
-            server.register_endpoint("process", self._process, arg_names=["data", "config"], default_args={"config": {}})
         """
-        self._endpoints[name] = EndpointHandler(handler, requires_input, arg_names, default_args)
+        self._endpoints[name] = EndpointHandler(handler, requires_input)
 
     def _validate_token(self, request: dict) -> bool:
         """
@@ -158,26 +131,11 @@ class BaseInferenceServer:
                     raise ValueError(f"Unknown endpoint: {endpoint}")
 
                 handler = self._endpoints[endpoint]
-
-                if handler.requires_input:
-                    request_data = request.get("data", {})
-
-                    if handler.arg_names is not None:
-                        # Extract specific arguments by name
-                        args = []
-                        for arg_name in handler.arg_names:
-                            if arg_name in request_data:
-                                args.append(request_data[arg_name])
-                            elif handler.default_args and arg_name in handler.default_args:
-                                args.append(handler.default_args[arg_name])
-                            else:
-                                raise ValueError(f"Missing required argument: {arg_name}")
-                        result = handler.handler(*args)
-                    else:
-                        # Pass all data as a single dict (backward compatibility)
-                        result = handler.handler(request_data)
-                else:
-                    result = handler.handler()
+                result = (
+                    handler.handler(request.get("data", {}))
+                    if handler.requires_input
+                    else handler.handler()
+                )
                 self.socket.send(MsgSerializer.to_bytes(result))
             except Exception as e:
                 print(f"Error in server: {e}")
@@ -246,26 +204,6 @@ class BaseInferenceClient:
             raise RuntimeError(f"Server error: {response['error']}")
         return response
 
-    def call_endpoint_with_args(self, endpoint: str, **kwargs) -> dict:
-        """
-        Call an endpoint on the server with named arguments.
-
-        Args:
-            endpoint: The name of the endpoint.
-            **kwargs: Named arguments to pass to the endpoint.
-        """
-        request: dict = {"endpoint": endpoint, "data": kwargs}
-        if self.api_token:
-            request["api_token"] = self.api_token
-
-        self.socket.send(MsgSerializer.to_bytes(request))
-        message = self.socket.recv()
-        response = MsgSerializer.from_bytes(message)
-
-        if "error" in response:
-            raise RuntimeError(f"Server error: {response['error']}")
-        return response
-
     def __del__(self):
         """Cleanup resources on destruction"""
         self.socket.close()
@@ -277,26 +215,10 @@ class ExternalRobotInferenceClient(BaseInferenceClient):
     Client for communicating with the RealRobotServer
     """
 
-    def __init__(self, host: str = "localhost", port: int = 5555, api_token: str = None, encode_video: bool = True):
-        super().__init__(host, port, api_token)
-        self.encode_video = encode_video
-
-    def get_action(
-        self, observations: Dict[str, Any], config: Dict[str, Any] = None
-    ) -> Dict[str, Any]:
+    def get_action(self, observations: Dict[str, Any]) -> Dict[str, Any]:
         """
         Get the action from the server.
         The exact definition of the observations is defined
         by the policy, which contains the modalities configuration.
         """
-        observations = self._encode_video(observations)
-        return self.call_endpoint_with_args("get_action", observations=observations, config=config)
-
-    def _encode_video(self, observation: dict) -> dict:
-        for key, value in observation.items():
-            if "video" in key:
-                frames = []
-                for frame in value:
-                    frames.append(cv2.imencode(".jpg", frame)[1].tobytes())
-                observation[key] = frames
-        return observation
+        return self.call_endpoint("get_action", observations)
